@@ -37,6 +37,9 @@ The shader includes a built-in OSD in the top-right corner showing:
     * **White:** Boost is inactive (Dark scene).
     * **Green:** Boost is active (Bright scene).
 
+ <img width="1313" height="247" alt="image" src="https://github.com/user-attachments/assets/38d246bc-1b66-41f3-a2a4-89b0eed3ce47" />
+Example setting for Horizon Forbidden West on g80sd hdr peak 1000
+
 ## ⚠️ Disclaimer
 
 This is a software-based post-processing effect. While it visually compensates for dimming, it cannot bypass the physical power limits of your panel. Use responsibly. I am not responsible for any potential burn-in or hardware issues, although this shader is generally safe as it only manipulates the image signal.
