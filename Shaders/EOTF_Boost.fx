@@ -1,9 +1,10 @@
 /*
-    EOTF Boost V7 (Smart Compression)
+    EOTF Boost V7.1 (Smart Compression + Fixes)
     
-    1. Highlight protection now uses soft compression instead of clipping/masking.
-       This keeps the image bright but preserves details in the clouds/sun.
-    2. Includes: Grid Sampling for accurate APL, Smooth Transitions, and Color Safe mode.
+    Changes in V7.1:
+    - Fixed a bug where Saturation Compensation was applied even when the boost was inactive.
+    - Fixed Highlight Compression applying to the original image when APL was low.
+    - Everything now smoothly fades to 100% original image when inactive.
 */
 
 #include "ReShade.fxh"
@@ -21,7 +22,7 @@ uniform float CompressionStart <
     ui_type = "slider";
     ui_min = 0.5; ui_max = 1.0;
     ui_label = "Compression Start (Soft Knee)";
-    ui_tooltip = "At what brightness level to start saving details. 0.8 = balanced. 1.0 = no protection (max brightness).";
+    ui_tooltip = "At what brightness level to start saving details. 0.8 = balanced. 1.0 = no protection.";
 > = 0.80;
 
 uniform float SaturationComp <
@@ -70,11 +71,9 @@ sampler SamplerBoostState { Texture = TexBoostState; };
 // --- FUNCTIONS ---
 
 float GetLuma(float3 color) {
-    // Standard Rec.709 luma coefficients
     return dot(color, float3(0.2126, 0.7152, 0.0722));
 }
 
-// Draw digits for OSD
 float GetDigit(int digit, float2 uv) {
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 0.0;
     int patterns[10] = { 31599, 9362, 29671, 29391, 23497, 31183, 31215, 29257, 31727, 31695 };
@@ -84,7 +83,6 @@ float GetDigit(int digit, float2 uv) {
     return (num >> (x + y * 3)) & 1;
 }
 
-// Draw percent sign
 float GetPercent(float2 uv) {
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 0.0;
     bool slash = abs(uv.x - (1.0 - uv.y)) < 0.15;
@@ -92,23 +90,17 @@ float GetPercent(float2 uv) {
     return (slash || circles) ? 1.0 : 0.0;
 }
 
-// Soft Shoulder Compression
-// Allows brightness to go up, but gently compresses highlights to avoid hard clipping
 float SoftCompress(float x, float t)
 {
-    if (x <= t) return x; // Below threshold? Don't touch it.
-    
-    // Reinhard-style rolloff for the excess brightness
+    if (x <= t) return x; 
     float overshoot = x - t;
     float compressed = overshoot / (1.0 + overshoot * 1.5); 
-    
     return t + compressed;
 }
 
 // --- SHADERS ---
 
-// PASS 1: Calculate Average Picture Level (APL)
-// Uses a 16x16 grid loop for accuracy instead of relying on driver downscaling
+// PASS 1: Calculate APL (Grid Sampling)
 float4 PS_CalcAPL(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Target
 {
     float totalLuma = 0.0;
@@ -125,61 +117,60 @@ float4 PS_CalcAPL(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Ta
     return float4(apl, apl, apl, 1.0);
 }
 
-// PASS 2: Update Logic State
-// Handles the smooth transition logic based on frame time
+// PASS 2: Update State (Smoothness)
 float4 PS_UpdateState(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Target
 {
     float currentAPL = tex2D(SamplerAPL, float2(0.5, 0.5)).r;
     float previousState = tex2D(SamplerBoostState, float2(0.5, 0.5)).r;
     
-    // Check if we passed the trigger threshold
     float targetState = smoothstep(APLTrigger, APLTrigger + 0.05, currentAPL);
-    
-    float dt = FrameTime * 0.001; // Convert ms to seconds
-    
-    // Lerp towards target for smooth fade in/out
+    float dt = FrameTime * 0.001; 
     float newState = lerp(previousState, targetState, saturate(dt * TransitionSpeed));
     return float4(newState, newState, newState, 1.0);
 }
 
-// PASS 3: Main Rendering Pass
+// PASS 3: Main Rendering
 float3 PS_MainPass(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Target
 {
     float3 color = tex2D(ReShade::BackBuffer, texcoord).rgb;
     float pixelLuma = GetLuma(color);
 
     float currentAPL = tex2D(SamplerAPL, float2(0.5, 0.5)).r;
-    float fader = tex2D(SamplerBoostState, float2(0.5, 0.5)).r;
+    float fader = tex2D(SamplerBoostState, float2(0.5, 0.5)).r; // 0.0 = Off, 1.0 = On
     
-    // Mask out shadows to keep blacks pure
+    // Mask out shadows
     float shadowFactor = smoothstep(0.0, ShadowProtect * 0.5 + 0.05, pixelLuma);
     
-    // Calculate total boost amount
+    // Calculate boost amount
     float activeBoost = BoostStrength * 0.5 * fader * shadowFactor;
     
-    // 1. Apply the boost curve
+    // 1. Apply boost
     float boostedLuma = pow(max(pixelLuma, 0.0001), 1.0 - activeBoost);
     
-    // 2. Compress highlights
-    // If brightness exceeds 'CompressionStart', soft-clip it so we don't lose texture details
-    boostedLuma = SoftCompress(boostedLuma, CompressionStart);
+    // 2. Compress highlights (FIX: Only apply compression blending based on fader)
+    // If fader is 0, we want strict original luma, not compressed luma.
+    float compressedLuma = SoftCompress(boostedLuma, CompressionStart);
+    boostedLuma = lerp(boostedLuma, compressedLuma, fader);
     
-    // 3. Recombine Color (Luma + Chroma method)
-    // Separation prevents hue shifts when boosting brightness
+    // 3. Recombine Color
     float3 chroma = color - pixelLuma;
-    chroma *= SaturationComp; // Restore saturation if needed
+    
+    // FIX: Apply saturation only proportional to the boost state
+    // When fader is 0.0, multiplier is 1.0 (original saturation)
+    float satMult = lerp(1.0, SaturationComp, fader);
+    chroma *= satMult;
     
     float3 finalColor = boostedLuma + chroma;
 
-    // Fallback for very dark pixels to avoid math artifacts
+    // Fallback for dark pixels
     if (pixelLuma < 0.01) {
        finalColor = color * (boostedLuma / max(pixelLuma, 0.0001));
     }
     
-    // --- OSD RENDER ---
+    // --- OSD ---
     if (ShowOSD) 
     {
-        float2 posStart = float2(0.90, 0.05); // Top right
+        float2 posStart = float2(0.90, 0.05);
         float scale = 0.04; 
         float aspect = ReShade::ScreenSize.x / ReShade::ScreenSize.y;
         
@@ -195,17 +186,16 @@ float3 PS_MainPass(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_T
         textMask += GetDigit(d2, (uvDigits - float2(scale * 0.7, 0.0)) / scale);
         textMask += GetPercent((uvDigits - float2(scale * 1.5, 0.0)) / scale);
 
-        // Green text = Active, White = Inactive
         float3 textColor = lerp(float3(1,1,1), float3(0,1,0), fader);
         
-        if (textMask < 0.5 && textMask > 0.1) finalColor = float3(0,0,0); // Text outline
+        if (textMask < 0.5 && textMask > 0.1) finalColor = float3(0,0,0); 
         else finalColor = lerp(finalColor, textColor, saturate(textMask));
     }
 
     return finalColor;
 }
 
-technique EOTF_Boost_V7_English
+technique EOTF_Boost_V7_1_English
 {
     pass APL_Calculation { VertexShader = PostProcessVS; PixelShader = PS_CalcAPL; RenderTarget = TexAPL; }
     pass Update_State { VertexShader = PostProcessVS; PixelShader = PS_UpdateState; RenderTarget = TexBoostState; }
