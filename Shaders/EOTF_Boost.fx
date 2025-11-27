@@ -1,10 +1,10 @@
 /*
-    EOTF Boost V7.1 (Smart Compression + Fixes)
+    EOTF Boost V7.2 (Smart Compression + OSD Fix)
     
-    Changes in V7.1:
-    - Fixed a bug where Saturation Compensation was applied even when the boost was inactive.
-    - Fixed Highlight Compression applying to the original image when APL was low.
-    - Everything now smoothly fades to 100% original image when inactive.
+    Changes in V7.2:
+    - Added "OSD Brightness" slider. Text no longer renders at max peak HDR brightness.
+    - Fixed Saturation Compensation applying when boost is inactive.
+    - Fixed Compression applying when boost is inactive.
 */
 
 #include "ReShade.fxh"
@@ -57,6 +57,13 @@ uniform bool ShowOSD <
     ui_label = "Show APL Stats";
     ui_tooltip = "Displays current APL percentage in the corner.";
 > = true;
+
+uniform float OSDBrightness <
+    ui_type = "slider";
+    ui_min = 0.01; ui_max = 1.0;
+    ui_label = "OSD Brightness";
+    ui_tooltip = "Controls the text brightness. 1.0 = Max HDR Brightness (Blinding). 0.25 = Paper White (Recommended).";
+> = 0.25;
 
 uniform float FrameTime < source = "frametime"; >;
 
@@ -136,7 +143,7 @@ float3 PS_MainPass(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_T
     float pixelLuma = GetLuma(color);
 
     float currentAPL = tex2D(SamplerAPL, float2(0.5, 0.5)).r;
-    float fader = tex2D(SamplerBoostState, float2(0.5, 0.5)).r; // 0.0 = Off, 1.0 = On
+    float fader = tex2D(SamplerBoostState, float2(0.5, 0.5)).r; 
     
     // Mask out shadows
     float shadowFactor = smoothstep(0.0, ShadowProtect * 0.5 + 0.05, pixelLuma);
@@ -147,27 +154,22 @@ float3 PS_MainPass(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_T
     // 1. Apply boost
     float boostedLuma = pow(max(pixelLuma, 0.0001), 1.0 - activeBoost);
     
-    // 2. Compress highlights (FIX: Only apply compression blending based on fader)
-    // If fader is 0, we want strict original luma, not compressed luma.
+    // 2. Compress highlights
     float compressedLuma = SoftCompress(boostedLuma, CompressionStart);
     boostedLuma = lerp(boostedLuma, compressedLuma, fader);
     
     // 3. Recombine Color
     float3 chroma = color - pixelLuma;
-    
-    // FIX: Apply saturation only proportional to the boost state
-    // When fader is 0.0, multiplier is 1.0 (original saturation)
     float satMult = lerp(1.0, SaturationComp, fader);
     chroma *= satMult;
     
     float3 finalColor = boostedLuma + chroma;
 
-    // Fallback for dark pixels
     if (pixelLuma < 0.01) {
        finalColor = color * (boostedLuma / max(pixelLuma, 0.0001));
     }
     
-    // --- OSD ---
+    // --- OSD RENDER ---
     if (ShowOSD) 
     {
         float2 posStart = float2(0.90, 0.05);
@@ -186,7 +188,8 @@ float3 PS_MainPass(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_T
         textMask += GetDigit(d2, (uvDigits - float2(scale * 0.7, 0.0)) / scale);
         textMask += GetPercent((uvDigits - float2(scale * 1.5, 0.0)) / scale);
 
-        float3 textColor = lerp(float3(1,1,1), float3(0,1,0), fader);
+        float3 baseColor = lerp(float3(1,1,1), float3(0,1,0), fader);
+        float3 textColor = baseColor * OSDBrightness; // Clamp OSD brightness
         
         if (textMask < 0.5 && textMask > 0.1) finalColor = float3(0,0,0); 
         else finalColor = lerp(finalColor, textColor, saturate(textMask));
@@ -195,7 +198,7 @@ float3 PS_MainPass(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_T
     return finalColor;
 }
 
-technique EOTF_Boost_V7_1_English
+technique EOTF_Boost_V7_2
 {
     pass APL_Calculation { VertexShader = PostProcessVS; PixelShader = PS_CalcAPL; RenderTarget = TexAPL; }
     pass Update_State { VertexShader = PostProcessVS; PixelShader = PS_UpdateState; RenderTarget = TexBoostState; }
