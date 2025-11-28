@@ -36,9 +36,11 @@ The shader includes a built-in OSD in the top-right corner showing:
 * **Status Color:**
     * **White:** Boost is inactive (Dark scene).
     * **Green:** Boost is active (Bright scene).
+  <img width="1274" height="222" alt="image" src="https://github.com/user-attachments/assets/6e61c305-0e51-4ef7-b55b-71bc7dbf56dd" />
+Example setting for Horizon Forbidden West default apl compensation on g80sd hdr peak 1000
 
  <img width="1313" height="247" alt="image" src="https://github.com/user-attachments/assets/38d246bc-1b66-41f3-a2a4-89b0eed3ce47" />
-Example setting for Horizon Forbidden West on g80sd hdr peak 1000
+Example setting for Horizon Forbidden West extreme apl compensation on g80sd hdr peak 1000
 
 ## ⚠️ Disclaimer
 
