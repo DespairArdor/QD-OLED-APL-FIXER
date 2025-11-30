@@ -37,7 +37,7 @@ uniform float APLTrigger <
     ui_min = 0.0; ui_max = 1.0;
     ui_label = "APL Trigger";
     ui_tooltip = "The effect only kicks in when average screen brightness exceeds this value (0.15 = 15%).";
-> = 0.15;
+> = 0.25;
 
 uniform float TransitionSpeed <
     ui_type = "slider";
@@ -51,7 +51,7 @@ uniform float ShadowProtect <
     ui_min = 0.0; ui_max = 1.0;
     ui_label = "Shadow Protection";
     ui_tooltip = "Prevents the boost from lifting deep blacks, keeping contrast intact.";
-> = 0.35;
+> = 1;
 
 uniform bool ShowOSD <
     ui_label = "Show APL Stats";
